@@ -43,10 +43,11 @@ const sendTokenResponse = (res, statusCode, user, token) => {
 // ================================
 // RATE LIMITERS
 // ================================
-const authLimiter = rateLimit({
+const verifyLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 10,
-    message: { success: false, message: 'Too many attempts, please try again after 15 minutes' }
+    max: 20,                   // 20 attempts per 15 min
+    validate: { xForwardedForHeader: false },
+    message: { success: false, message: 'Too many verification attempts, please try again after 15 minutes' }
 });
 // ================================
 // POST /api/auth/register
@@ -106,16 +107,18 @@ router.post('/verify', authLimiter, (req, res) => {
         if (!userId || !code)
             return res.status(400).json({ success: false, message: 'userId and code are required' });
 
+        // ✅ Pull the stored user details and create the DB record NOW
+        const pendingData = verificationStore.getData(userId);
+        if (!pendingData)
+            return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
+
+
         // ✅ Handle pending (pre-DB) registrations
         if (userId.startsWith('pending_')) {
             const result = verificationStore.verify(userId, code);
             if (!result.valid)
                 return res.status(400).json({ success: false, message: result.reason });
 
-            // ✅ Pull the stored user details and create the DB record NOW
-            const pendingData = verificationStore.getData(userId);
-            if (!pendingData)
-                return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
 
             const newUser = User.create(pendingData);
             User.markVerified(newUser.id);
