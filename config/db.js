@@ -78,7 +78,26 @@ const createTables = () => {
             CREATE INDEX IF NOT EXISTS idx_analytics_difficulty ON analytics(user_id, difficulty);
         `);
 
-        // Migrations
+        // ✅ FIX: Migration for old DBs where verification_codes table was never created
+        const vcExists = db.prepare(
+            `SELECT name FROM sqlite_master WHERE type='table' AND name='verification_codes'`
+        ).get();
+        if (!vcExists) {
+            console.log('🔄 Migrating: Creating verification_codes table...');
+            db.exec(`
+                CREATE TABLE verification_codes (
+                    key        TEXT PRIMARY KEY,
+                    code       TEXT NOT NULL,
+                    expires_at INTEGER NOT NULL,
+                    attempts   INTEGER DEFAULT 0,
+                    data       TEXT DEFAULT NULL,
+                    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+                )
+            `);
+            console.log('✅ verification_codes table created');
+        }
+
+        // Migrations: add missing columns to users
         const tableInfo = db.prepare("PRAGMA table_info(users)").all();
 
         if (!tableInfo.some(col => col.name === 'role')) {

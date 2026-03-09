@@ -7,7 +7,7 @@ const { protect } = require('../middleware/auth');
 const {
     generateVerificationCode,
     sendVerificationEmail,
-    sendPasswordResetOTPEmail,  // ✅ updated import
+    sendPasswordResetOTPEmail,
     sendPasswordResetEmail,
     sendWelcomeEmail
 } = require('../utils/emailService');
@@ -45,10 +45,19 @@ const sendTokenResponse = (res, statusCode, user, token) => {
 // ================================
 const verifyLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,                   // 20 attempts per 15 min
+    max: 20,
     validate: { xForwardedForHeader: false },
     message: { success: false, message: 'Too many verification attempts, please try again after 15 minutes' }
 });
+
+// ✅ FIX: authLimiter was missing — all routes were crashing with ReferenceError
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    validate: { xForwardedForHeader: false },
+    message: { success: false, message: 'Too many requests, please try again after 15 minutes' }
+});
+
 // ================================
 // POST /api/auth/register
 // ================================
@@ -66,19 +75,15 @@ router.post('/register', authLimiter, (req, res) => {
         if (password.length < 8)
             return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
 
-        // ✅ Check for duplicates before creating anything
         const existing = User.findByStudentIdOrEmail(studentId, email);
         if (existing) {
             const conflict = existing.student_id === studentId.trim().toLowerCase() ? 'Student ID' : 'Email';
             return res.status(409).json({ success: false, message: `${conflict} already registered` });
         }
 
-        // ✅ Generate a temp ID to track this pending registration
         const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
         const code = generateVerificationCode();
 
-        // ✅ Store both the code AND user details — no DB write yet
         verificationStore.set(tempId, code, { studentId, fullName, email, password, institution });
 
         sendVerificationEmail(email, fullName, code).catch(err =>
@@ -88,7 +93,7 @@ router.post('/register', authLimiter, (req, res) => {
         return res.status(201).json({
             success: true,
             message: 'Please check your email for a verification code.',
-            userId: tempId   // ← send tempId instead of real DB id
+            userId: tempId
         });
 
     } catch (error) {
@@ -107,22 +112,19 @@ router.post('/verify', authLimiter, (req, res) => {
         if (!userId || !code)
             return res.status(400).json({ success: false, message: 'userId and code are required' });
 
-        // ✅ Pull the stored user details and create the DB record NOW
         const pendingData = verificationStore.getData(userId);
         if (!pendingData)
             return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
 
-
-        // ✅ Handle pending (pre-DB) registrations
+        // Handle pending (pre-DB) registrations
         if (userId.startsWith('pending_')) {
             const result = verificationStore.verify(userId, code);
             if (!result.valid)
                 return res.status(400).json({ success: false, message: result.reason });
 
-
             const newUser = User.create(pendingData);
             User.markVerified(newUser.id);
-            verificationStore.delete(userId); // cleanup
+            verificationStore.delete(userId);
 
             sendWelcomeEmail(newUser.email, newUser.full_name).catch(err =>
                 console.error('Failed to send welcome email:', err.message)
@@ -145,7 +147,7 @@ router.post('/verify', authLimiter, (req, res) => {
             });
         }
 
-        // ✅ Fallback: already-in-DB users (e.g. admin-created accounts)
+        // Fallback: already-in-DB users (e.g. admin-created accounts)
         const user = User.findById(userId);
         if (!user)
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -195,19 +197,15 @@ router.post('/resend-code', authLimiter, (req, res) => {
         if (!userId)
             return res.status(400).json({ success: false, message: 'userId is required' });
 
-        // ✅ Handle pending registrations
+        // Handle pending registrations
         if (userId.startsWith('pending_')) {
             const pendingData = verificationStore.getData(userId);
             if (!pendingData)
                 return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
 
             const code = generateVerificationCode();
-            verificationStore.set(newUser.id, code, {
-                studentId: newUser.student_id,
-                fullName: newUser.full_name,
-                email: newUser.email,
-                institution: newUser.institution
-            }); // refresh code, keep user data
+            // ✅ FIX: was using undefined `newUser` — use `userId` and `pendingData` instead
+            verificationStore.set(userId, code, pendingData);
 
             sendVerificationEmail(pendingData.email, pendingData.fullName, code).catch(err =>
                 console.error('Failed to resend verification email:', err.message)
@@ -216,7 +214,7 @@ router.post('/resend-code', authLimiter, (req, res) => {
             return res.status(200).json({ success: true, message: 'New verification code sent!' });
         }
 
-        // ✅ Fallback for DB users
+        // Fallback for DB users
         const user = User.findById(userId);
         if (!user)
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -238,6 +236,7 @@ router.post('/resend-code', authLimiter, (req, res) => {
         return res.status(500).json({ success: false, message: 'Server error' });
     }
 });
+
 // ================================
 // POST /api/auth/login
 // ================================
@@ -248,13 +247,11 @@ router.post('/login', authLimiter, (req, res) => {
         if (!studentId || !password)
             return res.status(400).json({ success: false, message: 'Student ID / Email and password are required' });
 
-        // ✅ Try finding by studentId first, then by email
         const user = User.findByStudentId(studentId) || User.findByEmail(studentId);
 
         if (!user)
             return res.status(401).json({ success: false, message: 'No account found with that Student ID or Email' });
 
-        // Check role if provided (e.g. from specific login types)
         if (role && user.role !== role) {
             return res.status(403).json({
                 success: false,
@@ -283,7 +280,7 @@ router.post('/login', authLimiter, (req, res) => {
 });
 
 // ================================
-// POST /api/auth/forgot-password  ✅ NEW
+// POST /api/auth/forgot-password
 // ================================
 router.post('/forgot-password', authLimiter, (req, res) => {
     try {
@@ -298,7 +295,6 @@ router.post('/forgot-password', authLimiter, (req, res) => {
 
         const user = User.findByEmail(email);
 
-        // ✅ Security: always return same message whether email exists or not
         if (!user) {
             return res.status(200).json({
                 success: true,
@@ -306,7 +302,6 @@ router.post('/forgot-password', authLimiter, (req, res) => {
             });
         }
 
-        // Use 'reset_' prefix to keep reset codes separate from verify codes
         const code = generateVerificationCode();
         verificationStore.set(`reset_${user.id}`, code);
 
@@ -317,7 +312,7 @@ router.post('/forgot-password', authLimiter, (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'If that email is registered, a reset code has been sent.',
-            userId: user.id  // needed for /reset-password
+            userId: user.id
         });
 
     } catch (error) {
@@ -327,7 +322,7 @@ router.post('/forgot-password', authLimiter, (req, res) => {
 });
 
 // ================================
-// POST /api/auth/reset-password  ✅ NEW
+// POST /api/auth/reset-password
 // ================================
 router.post('/reset-password', authLimiter, (req, res) => {
     try {
@@ -356,7 +351,6 @@ router.post('/reset-password', authLimiter, (req, res) => {
         User.resetPassword(userId, newPassword);
         console.log('✅ Password updated for userId:', userId);
 
-        // ✅ Verify the new hash actually works
         const updatedUser = User.findById(userId);
         const testMatch = User.comparePassword(newPassword, updatedUser.password);
         console.log('🧪 Hash verify test (should be true):', testMatch);
@@ -371,6 +365,7 @@ router.post('/reset-password', authLimiter, (req, res) => {
         return res.status(500).json({ success: false, message: 'Server error' });
     }
 });
+
 // ================================
 // POST /api/auth/logout
 // ================================
