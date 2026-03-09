@@ -1,31 +1,8 @@
 const { getDB } = require('../config/db');
 
-const initTable = () => {
-    try {
-        const db = getDB();
-        db.exec(`
-            CREATE TABLE IF NOT EXISTS verification_codes (
-                key TEXT PRIMARY KEY,
-                code TEXT NOT NULL,
-                expires_at INTEGER NOT NULL,
-                attempts INTEGER DEFAULT 0,
-                data TEXT DEFAULT NULL,
-                created_at INTEGER DEFAULT (strftime('%s', 'now'))
-            )
-        `);
-        db.prepare('DELETE FROM verification_codes WHERE expires_at < ?').run(Date.now());
-        console.log('✅ Verification store ready (SQLite)');
-    } catch (err) {
-        console.error('❌ Failed to init verification_codes table:', err.message);
-    }
-};
-
-initTable();
-
 const EXPIRY_MS = 30 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 
-// Set a code — optionally store extra data (e.g. pending user details)
 const set = (key, code, data = null) => {
     try {
         const db = getDB();
@@ -39,12 +16,12 @@ const set = (key, code, data = null) => {
                 attempts = 0,
                 data = excluded.data
         `).run(String(key), String(code), expiresAt, data ? JSON.stringify(data) : null);
+        console.log(`📝 Code stored for key: ${key}`);
     } catch (err) {
         console.error('❌ verificationStore.set error:', err.message);
     }
 };
 
-// Get stored data for a key (used for pending registrations)
 const getData = (key) => {
     try {
         const db = getDB();
@@ -60,7 +37,13 @@ const getData = (key) => {
 const verify = (key, code) => {
     try {
         const db = getDB();
+        console.log(`🔍 Verifying key: ${key} | code: ${code}`);
+
         const entry = db.prepare('SELECT * FROM verification_codes WHERE key = ?').get(String(key));
+        console.log(`🔍 Entry:`, entry
+            ? `code=${entry.code} expires=${entry.expires_at} attempts=${entry.attempts}`
+            : 'NOT FOUND'
+        );
 
         if (!entry)
             return { valid: false, reason: 'Verification code not found. Please request a new one.' };
@@ -83,6 +66,7 @@ const verify = (key, code) => {
 
         // ✅ Valid — delete so it can't be reused
         db.prepare('DELETE FROM verification_codes WHERE key = ?').run(String(key));
+        console.log(`✅ Code verified for key: ${key}`);
         return { valid: true };
 
     } catch (err) {
@@ -91,7 +75,6 @@ const verify = (key, code) => {
     }
 };
 
-// Alias for delete (used in auth.js)
 const remove = (key) => {
     try {
         const db = getDB();
@@ -101,7 +84,4 @@ const remove = (key) => {
     }
 };
 
-// delete() is an alias for remove() — auth.js calls verificationStore.delete()
-const deleteKey = (key) => remove(key);
-
-module.exports = { set, verify, remove, delete: deleteKey, getData };
+module.exports = { set, verify, remove, delete: remove, getData };

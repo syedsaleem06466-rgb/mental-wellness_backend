@@ -5,9 +5,6 @@ const DB_PATH = path.join('/data', 'manorixia.db');
 
 let db;
 
-// =============================================
-// INITIALIZE DATABASE
-// =============================================
 const connectDB = () => {
     try {
         console.log(`🔌 Connecting to SQLite database at: ${DB_PATH}`);
@@ -16,7 +13,6 @@ const connectDB = () => {
             verbose: process.env.NODE_ENV === 'development' ? console.log : undefined
         });
 
-        // Performance pragmas
         db.pragma('journal_mode = WAL');
         db.pragma('foreign_keys = ON');
         db.pragma('synchronous = NORMAL');
@@ -33,15 +29,10 @@ const connectDB = () => {
     }
 };
 
-// =============================================
-// CREATE TABLES
-// =============================================
 const createTables = () => {
     try {
         db.exec(`
-            -- =============================================
             -- USERS TABLE
-            -- =============================================
             CREATE TABLE IF NOT EXISTS users (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 student_id  TEXT UNIQUE NOT NULL,
@@ -49,14 +40,12 @@ const createTables = () => {
                 email       TEXT UNIQUE NOT NULL,
                 password    TEXT NOT NULL,
                 role        TEXT DEFAULT 'user',
-                is_verified INTEGER DEFAULT 0,      
+                is_verified INTEGER DEFAULT 0,
                 institution TEXT,
                 created_at  TEXT DEFAULT (datetime('now'))
             );
 
-            -- =============================================
             -- ANALYTICS TABLE
-            -- =============================================
             CREATE TABLE IF NOT EXISTS analytics (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id      INTEGER NOT NULL,
@@ -71,30 +60,47 @@ const createTables = () => {
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
-            -- =============================================
-            -- INDEXES
-            -- =============================================
-            CREATE INDEX IF NOT EXISTS idx_users_email      ON users(email);
-            CREATE INDEX IF NOT EXISTS idx_users_student_id ON users(student_id);
+            -- VERIFICATION CODES TABLE
+            CREATE TABLE IF NOT EXISTS verification_codes (
+                key        TEXT PRIMARY KEY,
+                code       TEXT NOT NULL,
+                expires_at INTEGER NOT NULL,
+                attempts   INTEGER DEFAULT 0,
+                data       TEXT DEFAULT NULL,
+                created_at INTEGER DEFAULT (strftime('%s', 'now'))
+            );
 
+            -- INDEXES
+            CREATE INDEX IF NOT EXISTS idx_users_email          ON users(email);
+            CREATE INDEX IF NOT EXISTS idx_users_student_id     ON users(student_id);
             CREATE INDEX IF NOT EXISTS idx_analytics_user       ON analytics(user_id, completed_at DESC);
             CREATE INDEX IF NOT EXISTS idx_analytics_puzzle     ON analytics(user_id, puzzle_name);
             CREATE INDEX IF NOT EXISTS idx_analytics_difficulty ON analytics(user_id, difficulty);
         `);
 
-        // Migration: Add role column if it doesn't exist
+        // Migrations
         const tableInfo = db.prepare("PRAGMA table_info(users)").all();
-        const hasRole = tableInfo.some(col => col.name === 'role');
-        if (!hasRole) {
-            console.log('🔄 Migrating: Adding role column to users table...');
+
+        if (!tableInfo.some(col => col.name === 'role')) {
+            console.log('🔄 Migrating: Adding role column...');
             db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
         }
 
-        const hasInstitution = tableInfo.some(col => col.name === 'institution');
-        if (!hasInstitution) {
-            console.log('🔄 Migrating: Adding institution column to users table...');
+        if (!tableInfo.some(col => col.name === 'institution')) {
+            console.log('🔄 Migrating: Adding institution column...');
             db.exec("ALTER TABLE users ADD COLUMN institution TEXT");
         }
+
+        // Migration: add data column to verification_codes if missing
+        const vcInfo = db.prepare("PRAGMA table_info(verification_codes)").all();
+        if (!vcInfo.some(col => col.name === 'data')) {
+            console.log('🔄 Migrating: Adding data column to verification_codes...');
+            db.exec("ALTER TABLE verification_codes ADD COLUMN data TEXT DEFAULT NULL");
+        }
+
+        // Clean up expired verification codes on startup
+        const cleaned = db.prepare('DELETE FROM verification_codes WHERE expires_at < ?').run(Date.now());
+        if (cleaned.changes > 0) console.log(`🧹 Cleaned ${cleaned.changes} expired verification codes`);
 
         console.log('✅ Database tables created/verified');
     } catch (error) {
@@ -103,25 +109,16 @@ const createTables = () => {
     }
 };
 
-// =============================================
-// GET DATABASE INSTANCE
-// =============================================
 const getDB = () => {
-    if (!db) {
-        throw new Error('Database not initialized. Call connectDB() first.');
-    }
+    if (!db) throw new Error('Database not initialized. Call connectDB() first.');
     return db;
 };
 
-// =============================================
-// HEALTH CHECK
-// =============================================
 const checkDBHealth = () => {
     try {
         const db = getDB();
         const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get();
         const analyticsCount = db.prepare('SELECT COUNT(*) as count FROM analytics').get();
-
         return {
             connected: true,
             database: DB_PATH,
@@ -138,9 +135,6 @@ const checkDBHealth = () => {
     }
 };
 
-// =============================================
-// BACKUP DATABASE
-// =============================================
 const backupDB = async (backupPath) => {
     try {
         const db = getDB();
@@ -153,9 +147,6 @@ const backupDB = async (backupPath) => {
     }
 };
 
-// =============================================
-// CLOSE DATABASE
-// =============================================
 const closeDB = () => {
     try {
         if (db) {
@@ -168,9 +159,6 @@ const closeDB = () => {
     }
 };
 
-// =============================================
-// GRACEFUL SHUTDOWN
-// =============================================
 process.on('SIGINT', () => { console.log('\n🛑 SIGINT received'); closeDB(); process.exit(0); });
 process.on('SIGTERM', () => { console.log('\n🛑 SIGTERM received'); closeDB(); process.exit(0); });
 
