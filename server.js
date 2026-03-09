@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const { connectDB, checkDBHealth } = require('./config/db');
 
-// Import Routes
 const authRoutes = require('./routes/auth');
 const analyticsRoutes = require('./routes/analytics');
 const adminRoutes = require('./routes/admin');
@@ -11,14 +10,10 @@ const adminRoutes = require('./routes/admin');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// =============================================
-// Initialize Database
-// =============================================
-connectDB();
+// ✅ MUST be first — fixes rate limiter crash on Railway
+app.set('trust proxy', 1);
 
-// =============================================
-// Middleware
-// =============================================
+connectDB();
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
@@ -28,18 +23,13 @@ app.use((req, res, next) => {
     if (req.method === 'OPTIONS') return res.status(200).end();
     next();
 });
-// CORS Configuration
-app.use(cors({
-    origin: true,
-    credentials: true
-}));
 
+app.use(cors({ origin: true, credentials: true }));
 app.options('*', cors());
-// Body Parser
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-// Request Logger (development only)
 if (process.env.NODE_ENV === 'development') {
     app.use((req, res, next) => {
         console.log(`📡 ${req.method} ${req.url}`);
@@ -47,14 +37,10 @@ if (process.env.NODE_ENV === 'development') {
     });
 }
 
-// =============================================
-// Routes
-// =============================================
 app.use('/api/auth', authRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Health Check
 app.get('/api/health', (req, res) => {
     const dbHealth = checkDBHealth();
     res.json({
@@ -67,28 +53,16 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// =============================================
-// Error Handlers
-// =============================================
-
-// 404 Handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.method} ${req.url} not found.` });
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
     console.error('🔥 Unhandled Error:', err);
-
-    // Handle specific known errors
-    if (err.type === 'entity.too.large') {
+    if (err.type === 'entity.too.large')
         return res.status(413).json({ success: false, message: 'Request payload too large.' });
-    }
-
-    if (err.name === 'SyntaxError') {
+    if (err.name === 'SyntaxError')
         return res.status(400).json({ success: false, message: 'Invalid JSON in request body.' });
-    }
-
     res.status(err.status || 500).json({
         success: false,
         message: 'Internal server error.',
@@ -96,9 +70,6 @@ app.use((err, req, res, next) => {
     });
 });
 
-// =============================================
-// Start Server
-// =============================================
 const server = app.listen(PORT, () => {
     console.log('');
     console.log('🧩 ════════════════════════════════════════');
@@ -111,7 +82,6 @@ const server = app.listen(PORT, () => {
     console.log('');
 });
 
-// Graceful Shutdown
 const shutdown = (signal) => {
     console.log(`\n🛑 ${signal} received, shutting down gracefully...`);
     server.close(() => {
@@ -123,21 +93,17 @@ const shutdown = (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-// Catch unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
     console.error('🔥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Catch uncaught exceptions — only shutdown for truly fatal errors
 process.on('uncaughtException', (error) => {
     console.error('🔥 Uncaught Exception:', error);
-
     const nonFatal = ['timeout', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET'];
     if (nonFatal.some(e => error.message?.includes(e) || error.code?.includes(e))) {
         console.warn('⚠️  Non-fatal network error — server continues running');
-        return; // Don't shutdown for email/network timeouts
+        return;
     }
-
     shutdown('uncaughtException');
 });
 
