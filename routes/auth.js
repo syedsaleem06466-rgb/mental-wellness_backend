@@ -199,7 +199,12 @@ router.post('/resend-code', authLimiter, (req, res) => {
                 return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
 
             const code = generateVerificationCode();
-            verificationStore.set(userId, code, pendingData); // refresh code, keep user data
+            verificationStore.set(newUser.id, code, {
+                studentId: newUser.student_id,
+                fullName: newUser.full_name,
+                email: newUser.email,
+                institution: newUser.institution
+            }); // refresh code, keep user data
 
             sendVerificationEmail(pendingData.email, pendingData.fullName, code).catch(err =>
                 console.error('Failed to resend verification email:', err.message)
