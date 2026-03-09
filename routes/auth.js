@@ -48,7 +48,6 @@ const authLimiter = rateLimit({
     max: 10,
     message: { success: false, message: 'Too many attempts, please try again after 15 minutes' }
 });
-
 // ================================
 // POST /api/auth/register
 // ================================
@@ -66,16 +65,20 @@ router.post('/register', authLimiter, (req, res) => {
         if (password.length < 8)
             return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
 
+        // ✅ Check for duplicates before creating anything
         const existing = User.findByStudentIdOrEmail(studentId, email);
         if (existing) {
             const conflict = existing.student_id === studentId.trim().toLowerCase() ? 'Student ID' : 'Email';
             return res.status(409).json({ success: false, message: `${conflict} already registered` });
         }
 
-        const newUser = User.create({ studentId, fullName, email, password, institution });
+        // ✅ Generate a temp ID to track this pending registration
+        const tempId = `pending_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
         const code = generateVerificationCode();
-        verificationStore.set(newUser.id, code);
+
+        // ✅ Store both the code AND user details — no DB write yet
+        verificationStore.set(tempId, code, { studentId, fullName, email, password, institution });
 
         sendVerificationEmail(email, fullName, code).catch(err =>
             console.error('Failed to send verification email:', err.message)
@@ -83,8 +86,8 @@ router.post('/register', authLimiter, (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: 'Registered! Please check your email for a verification code.',
-            userId: newUser.id
+            message: 'Please check your email for a verification code.',
+            userId: tempId   // ← send tempId instead of real DB id
         });
 
     } catch (error) {
@@ -103,6 +106,43 @@ router.post('/verify', authLimiter, (req, res) => {
         if (!userId || !code)
             return res.status(400).json({ success: false, message: 'userId and code are required' });
 
+        // ✅ Handle pending (pre-DB) registrations
+        if (userId.startsWith('pending_')) {
+            const result = verificationStore.verify(userId, code);
+            if (!result.valid)
+                return res.status(400).json({ success: false, message: result.reason });
+
+            // ✅ Pull the stored user details and create the DB record NOW
+            const pendingData = verificationStore.getData(userId);
+            if (!pendingData)
+                return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
+
+            const newUser = User.create(pendingData);
+            User.markVerified(newUser.id);
+            verificationStore.delete(userId); // cleanup
+
+            sendWelcomeEmail(newUser.email, newUser.full_name).catch(err =>
+                console.error('Failed to send welcome email:', err.message)
+            );
+
+            const token = generateToken(newUser.id);
+            return res.status(200).json({
+                success: true,
+                message: 'Email verified successfully!',
+                token,
+                user: {
+                    id: newUser.id,
+                    studentId: newUser.student_id,
+                    fullName: newUser.full_name,
+                    email: newUser.email,
+                    role: newUser.role,
+                    institution: newUser.institution,
+                    isVerified: true
+                }
+            });
+        }
+
+        // ✅ Fallback: already-in-DB users (e.g. admin-created accounts)
         const user = User.findById(userId);
         if (!user)
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -152,6 +192,23 @@ router.post('/resend-code', authLimiter, (req, res) => {
         if (!userId)
             return res.status(400).json({ success: false, message: 'userId is required' });
 
+        // ✅ Handle pending registrations
+        if (userId.startsWith('pending_')) {
+            const pendingData = verificationStore.getData(userId);
+            if (!pendingData)
+                return res.status(400).json({ success: false, message: 'Registration session expired. Please register again.' });
+
+            const code = generateVerificationCode();
+            verificationStore.set(userId, code, pendingData); // refresh code, keep user data
+
+            sendVerificationEmail(pendingData.email, pendingData.fullName, code).catch(err =>
+                console.error('Failed to resend verification email:', err.message)
+            );
+
+            return res.status(200).json({ success: true, message: 'New verification code sent!' });
+        }
+
+        // ✅ Fallback for DB users
         const user = User.findById(userId);
         if (!user)
             return res.status(404).json({ success: false, message: 'User not found' });
@@ -173,7 +230,6 @@ router.post('/resend-code', authLimiter, (req, res) => {
         return res.status(500).json({ success: false, message: 'Server error' });
     }
 });
-
 // ================================
 // POST /api/auth/login
 // ================================

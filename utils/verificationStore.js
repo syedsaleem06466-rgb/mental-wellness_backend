@@ -1,13 +1,14 @@
-// Map structure: userId -> { code, expires }
+// Map structure: userId -> { code, expires, attempts, data }
 const store = new Map();
 
 const EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
-const set = (userId, code) => {
+const set = (userId, code, data = null) => {  // ✅ added optional data param
     store.set(userId, {
         code,
         expires: Date.now() + EXPIRY_MS,
-        attempts: 0
+        attempts: 0,
+        data  // ✅ stores pending registration details (null for normal verify flows)
     });
 };
 
@@ -26,8 +27,10 @@ const verify = (userId, inputCode) => {
     return { valid: true };
 };
 
+const getData = (userId) => store.get(userId)?.data ?? null;  // ✅ retrieve pending user details
+
 const remove = (userId) => store.delete(userId);
 
 const has = (userId) => store.has(userId);
 
-module.exports = { set, verify, remove, has };
+module.exports = { set, verify, getData, remove, has };  // ✅ export getData
