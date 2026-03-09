@@ -21,16 +21,11 @@ connectDB();
 // =============================================
 
 // CORS Configuration
-const allowedOrigins = process.env.FRONTEND_URL
-    ? process.env.FRONTEND_URL.split(',').map(o => o.trim())
-    : '*';
-
 app.use(cors({
     origin: true,
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    credentials: true
 }));
+
 app.options('*', cors());
 // Body Parser
 app.use(express.json({ limit: '10mb' }));
