@@ -3,6 +3,7 @@ const crypto = require('crypto');
 
 let resend = null;
 
+// Initialize immediately and synchronously — Resend doesn't need network on init
 const initializeEmailTransport = () => {
     if (!process.env.RESEND_API_KEY) {
         console.warn('⚠️  RESEND_API_KEY not set — email features disabled');
@@ -13,7 +14,8 @@ const initializeEmailTransport = () => {
     return resend;
 };
 
-setTimeout(() => initializeEmailTransport(), 3000);
+// Call immediately — Resend is just an HTTP client, no connection to verify
+initializeEmailTransport();
 
 const generateVerificationCode = (length = 6) => {
     const min = Math.pow(10, length - 1);
@@ -42,9 +44,10 @@ const sendVerificationEmail = async (email, fullName, code) => {
                     html: getVerificationEmailHTML(fullName, code)
                 });
                 if (error) throw new Error(error.message);
-                console.log(`✅ Verification email sent to ${email}`);
+                console.log(`✅ Verification email sent to ${email} | id: ${data?.id}`);
                 return { success: true, messageId: data?.id };
             } catch (err) {
+                console.error(`❌ Email attempt ${i + 1} failed:`, err.message);
                 if (i === 2) throw err;
                 await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
             }
@@ -95,6 +98,7 @@ const sendPasswordResetOTPEmail = async (email, fullName, code) => {
                 console.log(`✅ Password reset OTP sent to ${email}`);
                 return { success: true, messageId: data?.id };
             } catch (err) {
+                console.error(`❌ Reset email attempt ${i + 1} failed:`, err.message);
                 if (i === 2) throw err;
                 await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
             }
@@ -128,7 +132,7 @@ const sendStreakMilestoneEmail = async (email, fullName, streakCount) => {
     try {
         if (!resend) throw new Error('Email service not configured');
         const emoji = streakCount >= 30 ? '🔥' : '⭐';
-        const message = streakCount >= 30 ? `AMAZING! ${streakCount} day streak!` : `Great job! ${streakCount} day streak!`;
+        const message = streakCount >= 30 ? `AMAZING! ${streakCount} day streak!` : `Great! ${streakCount} day streak!`;
         const { data, error } = await resend.emails.send({
             from: FROM_ADDRESS,
             to: email,
