@@ -32,7 +32,7 @@ const initializeEmailTransport = () => {
     }
 };
 
-initializeEmailTransport();
+setTimeout(() => initializeEmailTransport(), 3000);
 
 const generateVerificationCode = (length = 6) => {
     const min = Math.pow(10, length - 1);

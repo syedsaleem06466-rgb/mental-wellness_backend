@@ -128,9 +128,16 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('🔥 Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Catch uncaught exceptions
+// Catch uncaught exceptions — only shutdown for truly fatal errors
 process.on('uncaughtException', (error) => {
     console.error('🔥 Uncaught Exception:', error);
+
+    const nonFatal = ['timeout', 'ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET'];
+    if (nonFatal.some(e => error.message?.includes(e) || error.code?.includes(e))) {
+        console.warn('⚠️  Non-fatal network error — server continues running');
+        return; // Don't shutdown for email/network timeouts
+    }
+
     shutdown('uncaughtException');
 });
 
