@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const bcrypt = require('bcryptjs'); // or 'bcrypt' depending on your setup
 
 const DB_PATH = path.join('/data', 'manorixia.db');
 
@@ -120,7 +121,23 @@ const createTables = () => {
         // Clean up expired verification codes on startup
         const cleaned = db.prepare('DELETE FROM verification_codes WHERE expires_at < ?').run(Date.now());
         if (cleaned.changes > 0) console.log(`🧹 Cleaned ${cleaned.changes} expired verification codes`);
+        // Seed admin user if not exists
 
+
+        const adminExists = db.prepare(
+            `SELECT id FROM users WHERE student_id = ?`
+        ).get('admin_test');
+
+        if (!adminExists) {
+            const hashedPassword = bcrypt.hashSync('admin_pass123', 10);
+            db.prepare(`
+        INSERT INTO users (student_id, full_name, email, password, role, is_verified)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `).run('admin_test', 'Admin User', 'admin@manorixia.com', hashedPassword, 'admin', 1);
+            console.log('✅ Admin user seeded');
+        } else {
+            console.log('ℹ️  Admin user already exists, skipping seed');
+        }
         console.log('✅ Database tables created/verified');
     } catch (error) {
         console.error('❌ Table creation error:', error.message);
