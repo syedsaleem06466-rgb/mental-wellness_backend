@@ -2,7 +2,7 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const bcrypt = require('bcryptjs'); // or 'bcrypt' depending on your setup
 
-const DB_PATH = path.join('/data', 'manorixia.db');
+const DB_PATH = path.join(__dirname, '..', 'data', 'manorixia.db');
 
 let db;
 
