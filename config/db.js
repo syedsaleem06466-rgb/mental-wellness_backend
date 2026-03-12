@@ -1,14 +1,22 @@
 const Database = require('better-sqlite3');
 const path = require('path');
-const bcrypt = require('bcryptjs'); // or 'bcrypt' depending on your setup
+const fs = require('fs');
+const bcrypt = require('bcryptjs');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'manorixia.db');
+const DB_DIR = path.join(__dirname, '..', 'data');
+const DB_PATH = path.join(DB_DIR, 'manorixia.db');
 
 let db;
 
 const connectDB = () => {
     try {
         console.log(`🔌 Connecting to SQLite database at: ${DB_PATH}`);
+
+        // Ensure the directory exists
+        if (!fs.existsSync(DB_DIR)) {
+            fs.mkdirSync(DB_DIR, { recursive: true });
+            console.log(`📁 Created database directory: ${DB_DIR}`);
+        }
 
         db = new Database(DB_PATH, {
             verbose: process.env.NODE_ENV === 'development' ? console.log : undefined
@@ -24,6 +32,7 @@ const connectDB = () => {
 
         console.log(`✅ SQLite Database Connected: ${DB_PATH}`);
         return db;
+
     } catch (error) {
         console.error(`❌ SQLite Connection Error: ${error.message}`);
         process.exit(1);
